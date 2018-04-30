@@ -1,0 +1,2 @@
+p, https://accounts.google.com, /secret_number, GET
+p, https://ga4gh.pmgenomics.ca/auth/realms/CanDIG, /secret_number, PUT

@@ -1,5 +1,5 @@
 # Build Stage
-FROM golang:1.10
+FROM golang:1.10 AS build-stage
 
 LABEL app="build-casbin-test"
 LABEL REPO="https://github.com/ljdursi/casbin-test"
@@ -20,7 +20,7 @@ RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
 RUN make build-alpine
 
 # Final Stage
-FROM lacion/docker-alpine:latest
+FROM golang:1.10
 
 ARG GIT_COMMIT
 ARG VERSION
@@ -34,6 +34,8 @@ ENV PATH=$PATH:/opt/casbin-test/bin
 WORKDIR /opt/casbin-test/bin
 
 COPY --from=build-stage /gopath/src/github.com/ljdursi/casbin-test/bin/casbin-test /opt/casbin-test/bin/
+COPY model.conf /opt/casbin-test/bin/
+COPY policy.csv /opt/casbin-test/bin/
 RUN chmod +x /opt/casbin-test/bin/casbin-test
 
-CMD /opt/casbin-test/bin/casbin-test
+CMD ./casbin-test
