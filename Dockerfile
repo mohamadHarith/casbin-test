@@ -1,19 +1,21 @@
 # Build Stage
-FROM lacion/docker-alpine:gobuildimage AS build-stage
+FROM golang:1.10
 
 LABEL app="build-casbin-test"
 LABEL REPO="https://github.com/ljdursi/casbin-test"
 
-ENV GOROOT=/usr/lib/go \
-    GOPATH=/gopath \
-    GOBIN=/gopath/bin \
+ENV GOPATH=/gopath \
     PROJPATH=/gopath/src/github.com/ljdursi/casbin-test
 
 # Because of https://github.com/docker/docker/issues/14914
-ENV PATH=$PATH:$GOROOT/bin:$GOPATH/bin
+ENV PATH=$PATH:$GOPATH/bin
+
+RUN mkdir -p $GOPATH/bin
 
 ADD . /gopath/src/github.com/ljdursi/casbin-test
 WORKDIR /gopath/src/github.com/ljdursi/casbin-test
+
+RUN curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
 
 RUN make build-alpine
 
