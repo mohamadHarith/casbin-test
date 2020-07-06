@@ -1,143 +1,153 @@
 package main
 
 import (
-    "strings"
-    "strconv"
-    "fmt"
-    "flag"
-    "log"
-    "io/ioutil"
-    "net/http"
-    "encoding/json"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
 
-    "github.com/dgrijalva/jwt-go"
-    "github.com/casbin/casbin"
-    "github.com/gorilla/mux"
+	casbin "github.com/casbin/casbin"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/gorilla/mux"
 )
 
+// Exception :
 type Exception struct {
-    Message string `json:"message"`
+	Message string `json:"message"`
 }
 
+// Greeting :
 type Greeting struct {
-    Message string `json:"message"`
+	Message string `json:"message"`
 }
 
+// User :
 type User struct {
-    email string `json:"email"`
-    source string `json:"iss"`
+	Email string `json:"email"`
+	Role  string `json:"sub"`
 }
 
+// authError :
 type authError struct {
-    header string
-    prob string
+	header string
+	prob   string
 }
 
 func (e *authError) Error() string {
-    return fmt.Sprintf("%s - s", e.header, e.prob)
+	return fmt.Sprintf("%s - %s", e.header, e.prob)
 }
 
-var secret_num int
-var policyEngine = casbin.NewEnforcer("model.conf", "policy.csv")
+var secretNum int
 
-func userFromHeader(auth_header string) (User, error) {
-    var user User
-    if auth_header == "" {
-        return user, &authError{auth_header, "Absent header"}
-    }
+var policyEngine, _ = casbin.NewEnforcer("model.conf", "policy.csv")
 
-    bearerToken := strings.Split(auth_header, " ")
-    if len(bearerToken) != 2 {
-        return user, &authError{auth_header, "Invalid bearer token"}
-    }
+// userFromHeader :
+func userFromHeader(authHeader string) (User, error) {
+	var user User
+	if authHeader == "" {
+		return user, &authError{authHeader, "Absent header"}
+	}
 
-    token, _ := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
-        log.Print("Got token ", token)
-        return []byte("secret"), nil
-    })
+	bearerToken := strings.Split(authHeader, " ")
+	if len(bearerToken) != 2 {
+		return user, &authError{authHeader, "Invalid bearer token"}
+	}
 
-    if claims, ok := token.Claims.(jwt.MapClaims); ok {
-        user.email = claims["email"].(string)
-        user.source = claims["iss"].(string)
-    } else {
-        return user, &authError{auth_header, "Not an OIDC token"}
-    }
+	token, _ := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
+		log.Print("Got token ", token)
+		return []byte("secret"), nil
+	})
 
-    return user, nil
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		user.Email = claims["email"].(string)
+		user.Role = claims["sub"].(string)
+	} else {
+		return user, &authError{authHeader, "Not an OIDC token"}
+	}
+
+	return user, nil
 }
 
+// Authorizer :
 func Authorizer(e *casbin.Enforcer) func(next http.Handler) http.Handler {
-    return func(next http.Handler) http.Handler {
-        fn := func(w http.ResponseWriter, req *http.Request) {
-            user, ok := userFromHeader(req.Header.Get("authorization"))
-            if ok != nil {
-                w.WriteHeader(http.StatusUnauthorized)
-                return
-            }
+	return func(next http.Handler) http.Handler {
+		fn := func(w http.ResponseWriter, req *http.Request) {
+			user, ok := userFromHeader(req.Header.Get("authorization"))
+			if ok != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 
-            res, err := e.EnforceSafe(user.source, req.URL.Path, req.Method)
-            if err != nil {
-                w.WriteHeader(http.StatusInternalServerError)
-                return
-            }
+			res, err := e.Enforce(user.Role, req.URL.Path, req.Method)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 
-            if !res {
-                w.WriteHeader(http.StatusForbidden)
-                return
-            }
+			if !res {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 
-            next.ServeHTTP(w, req)
-        }
-        return http.HandlerFunc(fn)
-    }
-}
-
-func GetSecret(w http.ResponseWriter, req *http.Request) {
-    json.NewEncoder(w).Encode(secret_num)
-}
-
-func PutSecret(w http.ResponseWriter, req *http.Request) {
-    body, ok := ioutil.ReadAll(req.Body)
-    if ok != nil {
-        w.WriteHeader(http.StatusBadRequest)
-        return
-    }
-
-    lines := strings.Split(string(body), "\n")
-
-    var tryNum int
-    tryNum, ok = strconv.Atoi(lines[0])
-    if ok != nil {
-        w.WriteHeader(http.StatusBadRequest)
-        return
-    }
-
-    secret_num = tryNum
-    json.NewEncoder(w).Encode(secret_num)
-}
-
-func main() {
-    var port = flag.Int("port", 8080, "port to listen on")
-	versionFlag := flag.Bool("version", false, "Version")
-	flag.Parse()
-
-	if *versionFlag {
-		fmt.Println("Git Commit:", GitCommit)
-		fmt.Println("Version:", Version)
-		if VersionPrerelease != "" {
-			fmt.Println("Version PreRelease:", VersionPrerelease)
+			next.ServeHTTP(w, req)
 		}
+		return http.HandlerFunc(fn)
+	}
+}
+
+// GetSecret :
+func GetSecret(w http.ResponseWriter, req *http.Request) {
+	fmt.Println("yes im here")
+	json.NewEncoder(w).Encode(secretNum)
+}
+
+// PutSecret :
+func PutSecret(w http.ResponseWriter, req *http.Request) {
+	body, ok := ioutil.ReadAll(req.Body)
+	if ok != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-    secret_num = 42;
+	lines := strings.Split(string(body), "\n")
 
-    router := mux.NewRouter()
-    fmt.Println("Starting the application...")
-    fmt.Println(*port)
+	var tryNum int
+	tryNum, ok = strconv.Atoi(lines[0])
+	if ok != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
-    router.HandleFunc("/secret_number", GetSecret).Methods("GET")
-    router.HandleFunc("/secret_number", PutSecret).Methods("PUT")
+	secretNum = tryNum
+	json.NewEncoder(w).Encode(secretNum)
+}
 
-    log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*port), Authorizer(policyEngine)(router)))
+func main() {
+	var port = flag.Int("port", 8080, "port to listen on")
+	// versionFlag := flag.Bool("version", false, "Version")
+	// flag.Parse()
+
+	// if *versionFlag {
+	// 	fmt.Println("Git Commit:", GitCommit)
+	// 	fmt.Println("Version:", Version)
+	// 	if VersionPrerelease != "" {
+	// 		fmt.Println("Version PreRelease:", VersionPrerelease)
+	// 	}
+	// 	return
+	// }
+
+	secretNum = 42
+
+	router := mux.NewRouter()
+	fmt.Println("Starting the application...")
+	fmt.Println(*port)
+
+	router.HandleFunc("/secretNumber", GetSecret).Methods("GET")
+	router.HandleFunc("/secretNumber", PutSecret).Methods("PUT")
+
+	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(*port), Authorizer(policyEngine)(router)))
 }
